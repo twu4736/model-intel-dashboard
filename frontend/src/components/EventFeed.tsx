@@ -14,7 +14,14 @@ export default function EventFeed({ events }: { events: EventRow[] }) {
     <div className="events">
       <h2>近期变更</h2>
       {events.map((e) => {
-        const cls = e.type === "new_model" ? "new" : e.type === "price_change" ? "price" : "";
+        const cls =
+          e.type === "new_model"
+            ? "new"
+            : e.type === "price_change"
+              ? "price"
+              : e.type === "deprecation"
+                ? "deprecated"
+                : "";
         return (
           <div key={e.id} className={`event ${cls}`}>
             <div className="dot" />

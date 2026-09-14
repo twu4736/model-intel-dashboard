@@ -273,6 +273,10 @@ tbody tr:hover {
   background: var(--amber);
 }
 
+.event.deprecated .dot {
+  background: var(--red);
+}
+
 .event .body {
   flex: 1;
   min-width: 0;

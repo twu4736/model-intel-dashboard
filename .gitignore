@@ -34,3 +34,6 @@ shot.png
 *.swp
 .DS_Store
 Thumbs.db
+
+# ---- 备份文件 ----
+backend/data/*.bak

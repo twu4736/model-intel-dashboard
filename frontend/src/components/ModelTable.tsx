@@ -14,7 +14,7 @@ const COLUMNS: { key: SortField; label: string }[] = [
   { key: "context_length", label: "上下文" },
   { key: "input_per_mtok", label: "输入价" },
   { key: "output_per_mtok", label: "输出价" },
-  { key: "hf_downloads", label: "下载量↓" },
+  { key: "hf_downloads", label: "下载量" },
   { key: "hf_likes", label: "点赞" },
   { key: "release_date", label: "发布" },
 ];
@@ -57,7 +57,9 @@ export default function ModelTable({ rows, sort, order, onSort }: Props) {
           {rows.map((m) => (
             <tr key={m.id}>
               <td>
-                <div style={{ fontWeight: 600 }}>{m.name}</div>
+                <div style={{ fontWeight: 600 }} title={m.description ?? undefined}>
+                  {m.name}
+                </div>
                 <div className="mono muted">{m.id}</div>
               </td>
               <td>{m.provider ?? "—"}</td>

@@ -1,4 +1,4 @@
-"""diff：把本次采集结果与库中现状对比，生成"新模型 / 价格变动"事件并落库。"""
+"""diff：把本次采集结果与库中现状对比，生成"新模型 / 价格变动 / 下架"事件并落库。"""
 from __future__ import annotations
 
 import sqlite3
@@ -85,6 +85,9 @@ def diff_and_persist(conn: sqlite3.Connection, models: list[ModelRecord]) -> dic
     events: list[dict] = []
 
     for m in models:
+        # OpenRouter 的变体 SKU（:batch / :free / :extended 等）与本体几乎重复，
+        # 正常入库与记价，但不产生事件，避免"新模型上线：X (batch)"这类噪音
+        is_variant = ":" in m.id
         if m.id in existing_ids:
             _update_model(conn, m, now)
             prev = latest.get(m.id)
@@ -95,7 +98,7 @@ def diff_and_persist(conn: sqlite3.Connection, models: list[ModelRecord]) -> dic
             if changed:
                 _store_price(conn, m, now)
                 price_change_count += 1
-                if not is_seed:
+                if not is_seed and not is_variant:
                     events.append({
                         "type": "price_change",
                         "model_id": m.id,
@@ -108,7 +111,7 @@ def diff_and_persist(conn: sqlite3.Connection, models: list[ModelRecord]) -> dic
             new_count += 1
             _store_model(conn, m, now)
             _store_price(conn, m, now)
-            if not is_seed:
+            if not is_seed and not is_variant:
                 events.append({
                     "type": "new_model",
                     "model_id": m.id,
@@ -117,6 +120,27 @@ def diff_and_persist(conn: sqlite3.Connection, models: list[ModelRecord]) -> dic
                     "after_value": _fmt_price(m.input_per_mtok, m.output_per_mtok),
                     "published_at": now,
                 })
+
+    # 下架检测：库里存在、本轮未再出现的模型 → 删除并记 deprecation 事件。
+    # 安全阀：采集结果相对库存异常偏少时跳过，防止上游 API 部分故障导致误删全库。
+    fetched_ids = {m.id for m in models}
+    deprecated = 0
+    if existing_ids and len(fetched_ids) >= max(10, len(existing_ids) // 2):
+        for gid in sorted(existing_ids - fetched_ids):
+            row = conn.execute("SELECT name FROM models WHERE id = ?", (gid,)).fetchone()
+            name = row["name"] if row else gid
+            prev = latest.get(gid)
+            conn.execute("DELETE FROM prices WHERE model_id = ?", (gid,))
+            conn.execute("DELETE FROM models WHERE id = ?", (gid,))
+            deprecated += 1
+            events.append({
+                "type": "deprecation",
+                "model_id": gid,
+                "title": f"模型下架：{name}",
+                "before_value": _fmt_price(prev["input_per_mtok"], prev["output_per_mtok"]) if prev else None,
+                "after_value": None,
+                "published_at": now,
+            })
 
     if is_seed:
         events.append({
@@ -139,5 +163,6 @@ def diff_and_persist(conn: sqlite3.Connection, models: list[ModelRecord]) -> dic
         "models": len(models),
         "new": new_count,
         "price_changes": price_change_count,
+        "deprecated": deprecated,
         "events": len(events),
     }

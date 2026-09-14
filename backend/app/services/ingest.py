@@ -1,7 +1,8 @@
-"""采集编排：OpenRouter(主) + LiteLLM(补) → 合并 → diff → 落库。"""
+"""采集编排：OpenRouter(主) + LiteLLM(补) + HuggingFace(热度) → 合并 → diff → 落库。"""
 from __future__ import annotations
 
 import sqlite3
+from typing import Callable, Optional
 
 from ..collectors import huggingface, litellm, openrouter
 from ..model import ModelRecord
@@ -47,21 +48,40 @@ def _apply_hf(m: ModelRecord, hf: dict[str, dict]) -> ModelRecord:
     return m
 
 
-def ingest(conn: sqlite3.Connection) -> dict:
-    models = openrouter.collect()
-    try:
-        ll = litellm.collect()
-    except Exception as e:  # LiteLLM 是补充源，失败不应阻断主流程
-        print("[ingest] litellm skipped:", e)
-        ll = {}
+def ingest(
+    conn: sqlite3.Connection,
+    report: Optional[Callable[[str], None]] = None,
+) -> dict:
+    def say(stage: str) -> None:
+        if report:
+            report(stage)
 
-    # 收集所有 hugging_face_id，交给 HF 采集器（热门榜命中 + 未命中的逐个补查）
+    warnings: list[str] = []
+
+    say("拉取 OpenRouter 模型列表…")
+    models = openrouter.collect()
+
+    try:
+        say("拉取 LiteLLM 补充数据…")
+        ll = litellm.collect()
+    except Exception:  # LiteLLM 是补充源，失败不阻断主流程
+        ll = {}
+        warnings.append("LiteLLM 补充数据拉取失败，能力标志/兜底定价可能不全")
+
+    # 收集所有 hugging_face_id，交给 HF 采集器（热门榜命中 + 未命中的并发补查）
     hf_ids = [m.hugging_face_id for m in models if m.hugging_face_id]
     try:
-        hf = huggingface.collect(missing_ids=hf_ids)
-    except Exception as e:  # HF 同为补充源，失败不阻断
-        print("[ingest] huggingface skipped:", e)
+        say("拉取 HuggingFace 热门榜…")
+        hf = huggingface.collect(missing_ids=hf_ids, report=say)
+    except Exception:  # HF 同为补充源，失败不阻断
         hf = {}
+        warnings.append("HuggingFace 热度拉取失败，下载量/点赞列为空")
 
     merged = [_apply_hf(_merge(m, ll), hf) for m in models]
-    return diff_and_persist(conn, merged)
+    hf_matched = sum(1 for m in merged if m.hf_downloads is not None)
+
+    say("对比差异并落库…")
+    result = diff_and_persist(conn, merged)
+    result["hf_matched"] = hf_matched
+    result["warnings"] = warnings
+    return result

@@ -3,8 +3,10 @@
 export function fmtPrice(v: number | null): string {
   if (v === null || v === undefined) return "—";
   if (v === 0) return "免费";
-  if (v < 1) return `$${v}`;
-  return `$${v}`;
+  if (v >= 100) return `$${Math.round(v)}`;
+  if (v >= 1) return `$${v.toFixed(2).replace(/\.00$/, "")}`;
+  // < 1：最多 4 位小数、去掉多余尾零，但至少保留 2 位（$0.10 而非 $0.1）
+  return `$${v.toFixed(4).replace(/0{1,2}$/, "")}`;
 }
 
 export function fmtCtx(v: number | null): string {

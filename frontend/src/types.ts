@@ -9,6 +9,7 @@ export interface ModelRow {
   supports_reasoning: number;
   open_source: number | null;
   release_date: string | null;
+  description: string | null;
   input_per_mtok: number | null;
   output_per_mtok: number | null;
   cache_read_per_mtok: number | null;
@@ -34,13 +35,33 @@ export interface EventRow {
 
 export interface EventsResponse {
   items: EventRow[];
+  total: number;
 }
 
 export interface RefreshResult {
   models: number;
   new: number;
   price_changes: number;
+  deprecated: number;
   events: number;
+  hf_matched: number;
+  warnings: string[];
+}
+
+export type JobStatus = "idle" | "running" | "done" | "error";
+
+export interface JobState {
+  status: JobStatus;
+  stage: string;
+  result: RefreshResult | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RefreshStartResponse {
+  started: boolean;
+  job: JobState;
 }
 
 export type SortField =
