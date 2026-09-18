@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS models (
     release_date              TEXT,
     description               TEXT,
     source                    TEXT,
+    category                  TEXT,               -- llm/multimodal/image/audio
     hf_downloads              INTEGER,            -- HF 30 天下载量（热度代理）
     hf_likes                  INTEGER,            -- HF 点赞数
     hugging_face_id           TEXT,
@@ -55,6 +56,11 @@ def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # 兼容已有库：尝试为老库补上新增的列（重复添加会抛 OperationalError，吞掉）
+        try:
+            conn.execute("ALTER TABLE models ADD COLUMN category TEXT")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
 
 
 @contextmanager

@@ -30,13 +30,13 @@ def _store_model(conn, m: ModelRecord, now: str) -> None:
     conn.execute(
         "INSERT INTO models (id, name, provider, context_length, modalities, "
         "supports_vision, supports_function_calling, supports_reasoning, open_source, "
-        "release_date, description, source, hf_downloads, hf_likes, hugging_face_id, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "release_date, description, source, category, hf_downloads, hf_likes, hugging_face_id, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             m.id, m.name, m.provider, m.context_length, m.modalities,
             int(m.supports_vision), int(m.supports_function_calling), int(m.supports_reasoning),
             None if m.open_source is None else int(m.open_source),
-            m.release_date, m.description, m.source,
+            m.release_date, m.description, m.source, m.category,
             m.hf_downloads, m.hf_likes, m.hugging_face_id, now,
         ),
     )
@@ -46,13 +46,13 @@ def _update_model(conn, m: ModelRecord, now: str) -> None:
     conn.execute(
         "UPDATE models SET name=?, provider=?, context_length=?, modalities=?, "
         "supports_vision=?, supports_function_calling=?, supports_reasoning=?, "
-        "open_source=?, release_date=?, description=?, source=?, "
+        "open_source=?, release_date=?, description=?, source=?, category=?, "
         "hf_downloads=?, hf_likes=?, hugging_face_id=?, updated_at=? WHERE id=?",
         (
             m.name, m.provider, m.context_length, m.modalities,
             int(m.supports_vision), int(m.supports_function_calling), int(m.supports_reasoning),
             None if m.open_source is None else int(m.open_source),
-            m.release_date, m.description, m.source,
+            m.release_date, m.description, m.source, m.category,
             m.hf_downloads, m.hf_likes, m.hugging_face_id, now, m.id,
         ),
     )

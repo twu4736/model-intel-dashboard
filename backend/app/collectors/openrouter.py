@@ -6,7 +6,7 @@ from typing import Optional
 
 import httpx
 
-from ..model import ModelRecord, per_mtok
+from ..model import ModelRecord, compute_category, per_mtok
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/models"
 TIMEOUT = 30.0
@@ -38,6 +38,9 @@ def parse(m: dict) -> Optional[ModelRecord]:
     in_mod = arch.get("input_modalities") or []
     out_mod = arch.get("output_modalities") or []
     modalities = f"{'+'.join(in_mod) or 'text'}->{'+'.join(out_mod) or 'text'}"
+
+    # 按主功能互斥分类（图像生成 > 语音 > 多模态 > LLM），落到具体类别
+    category = compute_category(in_mod, out_mod)
 
     sup_params = set(m.get("supported_parameters") or [])
     supports_vision = "image" in in_mod
@@ -76,6 +79,7 @@ def parse(m: dict) -> Optional[ModelRecord]:
         release_date=release_date,
         description=m.get("description"),
         source="openrouter",
+        category=category,
         hugging_face_id=hf_id_clean,
     )
 

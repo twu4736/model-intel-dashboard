@@ -10,17 +10,25 @@ export interface ModelRow {
   open_source: number | null;
   release_date: string | null;
   description: string | null;
+  category: string;
   input_per_mtok: number | null;
   output_per_mtok: number | null;
   cache_read_per_mtok: number | null;
-  hf_downloads: number | null;
-  hf_likes: number | null;
+  /** 热度 = log10(1+下载)*2 + log10(1+点赞)；NULL 表示 HF 数据缺失 */
+  heat: number | null;
+}
+
+export interface ProviderOption {
+  name: string;
+  count: number;
 }
 
 export interface ModelsResponse {
   items: ModelRow[];
   total: number;
-  providers: string[];
+  providers: ProviderOption[];
+  /** 当前分类下的最大热度值，用于热度条归一化 */
+  max_heat: number;
 }
 
 export interface EventRow {
@@ -71,5 +79,4 @@ export type SortField =
   | "input_per_mtok"
   | "output_per_mtok"
   | "release_date"
-  | "hf_downloads"
-  | "hf_likes";
+  | "heat";

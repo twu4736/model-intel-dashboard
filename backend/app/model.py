@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
 
 
 def per_mtok(value) -> Optional[float]:
@@ -24,6 +24,32 @@ def per_mtok(value) -> Optional[float]:
     return round(v * 1_000_000, 4)
 
 
+# 分类常量（前后端共享语义，前端 categories.ts 镜像）
+CATEGORY_LLM = "llm"
+CATEGORY_MULTIMODAL = "multimodal"
+CATEGORY_IMAGE = "image"
+CATEGORY_AUDIO = "audio"
+
+
+def compute_category(in_mods: Optional[Iterable[str]], out_mods: Optional[Iterable[str]]) -> str:
+    """按主功能互斥分类：图像生成 > 语音 > 多模态 > LLM。
+
+    - 输出含 image/video → 图像生成（含视频生成，作为媒体生成统一桶）
+    - 输入/输出含 audio 且非图像生成 → 语音
+    - 输入含 image（且非图像生成/语音） → 多模态
+    - 其余 → 大语言模型
+    """
+    in_set = set(in_mods or [])
+    out_set = set(out_mods or [])
+    if out_set & {"image", "video"}:
+        return CATEGORY_IMAGE
+    if in_set & {"audio"} or out_set & {"audio"}:
+        return CATEGORY_AUDIO
+    if in_set & {"image"}:
+        return CATEGORY_MULTIMODAL
+    return CATEGORY_LLM
+
+
 @dataclass
 class ModelRecord:
     """从各数据源归一化后的模型记录。"""
@@ -43,6 +69,7 @@ class ModelRecord:
     release_date: Optional[str]   # ISO yyyy-mm-dd
     description: Optional[str]
     source: str
+    category: str = CATEGORY_LLM  # 按模态互斥归类，见 compute_category()
     hugging_face_id: Optional[str] = None   # 用于匹配 HF 热度
     hf_downloads: Optional[int] = None      # 30 天下载量（热度代理）
     hf_likes: Optional[int] = None          # 点赞数
