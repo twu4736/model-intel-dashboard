@@ -1,6 +1,6 @@
 # 全球模型情报看板
 
-一个聚合全球主流大语言模型**发布、定价、能力变更**的情报看板。每次采集自动 diff 出"新模型上线 / 价格变动 / 模型下架"事件，省去手工跟踪各家厂商官网的麻烦。
+一个聚合全球主流大语言模型**发布、定价、能力变更**的情报看板。按主功能互斥分到大语言模型 / 多模态 / 图像 / 语音四类页面，每次采集自动 diff 出"新模型 / 价格变动 / 模型下架"事件，省去手工跟踪各家厂商官网的麻烦。
 
 ## 数据来源
 
@@ -23,42 +23,74 @@ collect(HuggingFace)─┘                  │
                                         └─ 已下架  → deprecation 事件 + 删除陈旧行
 ```
 
-`diff` 是情报看板的核心：它把"重新拉一份全量数据"转成可读事件。数据库无变化时不产生任何噪音事件。下架检测带安全阀——采集结果相对库存异常偏少（上游故障）时跳过，避免误删。
+`diff` 是情报看板的核心：把"重新拉一份全量数据"转成可读事件。数据库无变化时不产生任何噪音事件。下架检测带安全阀——采集结果相对库存异常偏少（上游故障）时跳过，避免误删。
 
 采集是**后台任务**：`POST /api/refresh` 立即返回，前端轮询 `GET /api/refresh` 展示阶段进度（拉主源 → 补充源 → HF 热门榜 → 并发补查 → diff 落库）；同一时刻只允许一个采集任务，避免并发 diff 产生重复事件。
+
+## 分类规则
+
+按模态互斥分到 4 类，落到 `models.category` 列，渲染到 4 个独立 URL：
+
+| 分类 | URL | 规则 |
+|------|-----|------|
+| 图像 | `/image` | 输出含 image / video（视频生成归入媒体生成统一桶） |
+| 语音 | `/audio` | 输入或输出含 audio（且不是图像） |
+| 多模态 | `/multimodal` | 输入含 image（且不是图像 / 语音） |
+| 大语言模型 | `/llm` | 其余（纯 text→text） |
+
+例：GPT-4o 因支持图像输入归入「多模态」；DALL·E 因输出图像归入「图像」；Gemini Flash 含 audio 输入归入「语音」。
+
+## 热度计算
+
+单一数值替代原始的下载量 / 点赞两列：
+
+```
+HF 可达时：   heat = log10(1 + 下载量) × 2 + log10(1 + 点赞)
+HF 不可达时： heat = 开源(+3) + log10(1 + 上下文) + 多模态(+1.5)
+```
+
+- **对数压缩**：少数模型下载量上亿而大多数几百，log10 把量级差从 10000× 压到 ~5×
+- **权重 2 : 1**：下载量代表实际使用，点赞代表社区认可
+- **代理三轴**：开源（社区可本地运行）、上下文（log 缩放）、多模态（能力更广）
+- **SQL 一次性算好**，`ORDER BY heat` 严格有序；前端进度条相对当前分类 max_heat 归一化
+- 列头悬停可见公式 tooltip；进度条冷 / 暖 / 热三档着色（蓝 / 紫 / 金）
 
 ## 技术栈
 
 - **后端**：Python 3.11+ · FastAPI · httpx · SQLite
-- **前端**：React 18 · TypeScript · Vite
+- **前端**：React 18 · TypeScript · Vite · react-router-dom
 
 ## 项目结构
 
 ```
 ├── backend/
 │   ├── app/
-│   │   ├── model.py              # 统一 ModelRecord + per-MTok 换算
-│   │   ├── db.py                 # SQLite 连接与 schema
+│   │   ├── model.py              # ModelRecord + per_mtok + compute_category() + 分类常量
+│   │   ├── db.py                 # SQLite 连接 + schema（含 category 列 ALTER 迁移）
 │   │   ├── collectors/
-│   │   │   ├── openrouter.py     # 主数据源采集器
-│   │   │   ├── litellm.py        # 补充源采集器
-│   │   │   └── huggingface.py    # 热度源采集器（热门榜 + 并发补查）
+│   │   │   ├── openrouter.py     # 主数据源（含分类计算）
+│   │   │   ├── litellm.py        # 补充源
+│   │   │   └── huggingface.py    # 热度源（热门榜 + 并发补查）
 │   │   ├── services/
 │   │   │   ├── ingest.py         # 采集编排 + 字段合并 + 进度上报
-│   │   │   ├── diff.py           # diff 检测 + 事件生成（含下架检测）+ 落库
+│   │   │   ├── diff.py           # diff 检测 + 事件生成 + 落库
 │   │   │   └── jobs.py           # 后台采集任务（单实例 + 进度快照）
-│   │   ├── routers/api.py        # /api/models /api/events /api/refresh
-│   │   └── main.py               # FastAPI 入口，空库时后台播种
+│   │   ├── routers/api.py        # /api/models（category/能力筛选） /api/events /api/refresh
+│   │   └── main.py               # FastAPI 入口，空库时后台播种 + 托管前端构建产物
 │   └── requirements.txt
 └── frontend/
     ├── src/
-    │   ├── App.tsx               # 主界面：工具栏 + 表格 + 事件流 + 采集进度轮询
-    │   ├── api.ts                # API 客户端（支持 AbortSignal 取消）
-    │   ├── types.ts              # 类型定义
-    │   ├── utils.ts              # 价格/上下文/时间格式化
+    │   ├── App.tsx               # 路由壳（/、/llm、/multimodal、/image、/audio）
+    │   ├── api.ts                # API 客户端（AbortSignal 取消）
+    │   ├── categories.ts         # 4 分类常量 + 反查
+    │   ├── types.ts              # 类型定义（含 heat 字段）
+    │   ├── utils.ts              # 价格 / 上下文 / 热度格式化
     │   └── components/
-    │       ├── ModelTable.tsx    # 模型表格（搜索/筛选/排序/分页）
-    │       └── EventFeed.tsx     # 变更事件流
+    │       ├── Layout.tsx        # 侧边栏 + 主区骨架
+    │       ├── CategoryPage.tsx  # 单分类页主体（URL 状态 + toolbar + 表格 + 事件流）
+    │       ├── ModelTable.tsx    # 模型表格（含热度列 + sticky 表头）
+    │       ├── EventFeed.tsx     # 变更事件流（错峰 slide-in）
+    │       └── icons.tsx         # 内联 SVG 图标（Chat/Eye/Image/Mic/Refresh 等）
     └── vite.config.ts
 ```
 
@@ -92,27 +124,33 @@ npm run build      # 产物输出到 frontend/dist，后端启动后自动托管
 
 ```powershell
 cd frontend
-npm install
 npm run dev
 ```
 
 ## API
 
 | 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/models` | 模型列表，支持 `search` `provider` `vision` `sort` `order` `limit` `offset`；默认按发布时间倒序，排序带稳定兜底键 |
-| GET | `/api/events` | 变更事件流（按时间倒序），返回 `items` + `total` |
+|------|------|------|
+| GET | `/api/models` | 模型列表，支持 `category` `search` `provider` `vision` `reasoning` `function_calling` `open_source` `sort` `order` `limit` `offset`；默认 `category=llm` |
+| GET | `/api/events` | 变更事件流（按时间倒序），可选 `category`（仅返回该类相关事件，seed 等全局事件保留） |
 | POST | `/api/refresh` | 启动后台采集（立即返回 `{started, job}`，已在采集时 `started=false`） |
 | GET | `/api/refresh` | 采集任务状态快照：`status` `stage` `result` `error` |
 
+`/api/models` 响应额外带 `max_heat`（当前分类最大热度），前端热度条用它归一化；`providers` 改为 `[{name, count}]`，下拉显示 `openai (12)`。
+
 ## 功能
 
-- 默认「最新发布」视图；可搜索 / 按厂商筛选 / 仅看视觉 / 任意列排序 / 分页的模型表格
+- 4 个分类独立页面，左侧固定导航栏切换，URL 可分享 / 收藏
+- 筛选状态完整持久化到 URL（`?search=&provider=&vision=&reasoning=&fc=&open=&sort=heat&order=desc`），刷新保留
+- 能力筛选：视觉 / 推理 / 工具调用 / 开源 四独立 toggle
+- 厂商下拉显示模型数；排序预设含「最新发布 / 热度 ↓ 热门 / 热度 ↑ 冷门 / 输入价 ↑↓ / 输出价 ↑ / 上下文最长 / 名称 A-Z」
+- 表格列：模型 / 厂商 / 上下文 / 输入价 / 输出价 / **热度**（数值 + 渐变进度条 + 三档着色）/ 发布 / 能力标签
 - 定价展示为"每 1M token 美元"，免费模型标绿，缺失标 —
 - 能力标签：视觉 / 推理 / 工具调用 / 开源；模型名悬浮显示描述
-- 变更事件流：新模型上线、价格变动（前后值对比）、模型下架（红点）
+- 变更事件流（每页只显示该类相关事件）：新模型上线、价格变动（前后值对比）、模型下架（红点）
 - 一键采集：后台执行 + 实时阶段进度 + 完成摘要（含补充源失败警告）
 - 变体 SKU（`:batch` / `:free`）入库但不产生事件，事件流无噪音
+- 视觉风格：深色主题 + 双 radial-gradient 背景 + 9 档面板色 + sticky 表头 + 入场 / hover / 侧滑 / spin 动画
 
 ## 后续可扩展
 
@@ -120,3 +158,4 @@ npm run dev
 - 厂商 RSS / GitHub releases 跟踪新发布
 - 定时自动采集（cron / GitHub Actions）+ 变更推送（Telegram / Discord / 邮件）
 - Docker 部署
+- 给热度加更多代理轴（provider 名气、supported_parameters 数量、发布时间新鲜度）
